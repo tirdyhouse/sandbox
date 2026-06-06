@@ -260,6 +260,8 @@ func Probe() ProbeResult {
 		return probeLinux()
 	case "darwin":
 		return probeDarwin()
+	case "windows":
+		return probeWindows()
 	default:
 		return ProbeResult{
 			Platform: runtime.GOOS,
