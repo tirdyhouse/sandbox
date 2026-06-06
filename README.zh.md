@@ -157,9 +157,12 @@ sandbox/
   <a href="https://helix.iqe.me/"><strong>Helix</strong></a> — <em>开放 AI Agent 平台</em>
 </p>
 
-**sandbox** 由 [Helix](https://helix.iqe.me/) 支持开发。Helix 是一个开放 AI Agent 平台，在沙箱环境中安全运行 LLM 生成的每条命令。
+**sandbox** 由 [Helix](https://helix.iqe.me/) 支持开发。Helix 是一个开放 AI Agent 平台，在沙箱环境中安全运行 LLM 生成的每条命令。Helix 坚持**全工具链纯 Go 实现**——从 Agent 运行时、LLM 路由、沙箱、MCP 工具层到代码分析，全部用 Go 编写，零外部运行时依赖。
 
-Helix 提供托管构建环境、[EasyGateway](https://helix.iqe.me/) 穿透隧道、多 Agent 协作和工作区驱动工作流。**命令的沙箱交给我们，你只管关注业务。**
+Helix 提供托管构建环境、[EasyGateway](https://helix.iqe.me/) 穿透隧道、多 Agent 协作和工作区驱动工作流。**一条命令部署：**
+
+```bash
+```
 
 > 立即体验： [helix.iqe.me](https://helix.iqe.me/)
 
