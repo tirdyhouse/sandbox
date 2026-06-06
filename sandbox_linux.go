@@ -31,13 +31,14 @@ import (
 //	 445 — landlock_add_rule
 //	 446 — landlock_restrict_self
 const (
-	landlockCreateRuleset  = 444
-	landlockAddRule        = 445
-	landlockRestrictSelf   = 446
+	landlockCreateRuleset   = 444
+	landlockAddRule         = 445
+	landlockRestrictSelf    = 446
 	landlockRulePathBeneath = 1
 	landlockCreateVersion   = 1
 
 	// Filesystem access rights (from <linux/landlock.h>).
+	// These are valid across all ABI versions; ABI>=2 adds Refer, ABI>=3 adds Truncate.
 	landlockAccessExecute    = 1 << 0
 	landlockAccessWriteFile  = 1 << 1
 	landlockAccessReadFile   = 1 << 2
@@ -49,23 +50,25 @@ const (
 	landlockAccessMakeReg    = 1 << 8
 	landlockAccessMakeSock   = 1 << 9
 	landlockAccessMakeSym    = 1 << 12
-	landlockAccessRefer      = 1 << 13
-	landlockAccessTruncate   = 1 << 14
 
-	// Composite: all write-related rights.
-	landlockAccessWrite = landlockAccessWriteFile |
+	// ABI >= 2 only.
+	landlockAccessRefer = 1 << 13
+
+	// ABI >= 3 only.
+	landlockAccessTruncate = 1 << 14
+
+	// Composite: all basic write-related rights (valid on ABI 1+).
+	landlockAccessWriteABI1 = landlockAccessWriteFile |
 		landlockAccessRemoveFile |
 		landlockAccessRemoveDir |
 		landlockAccessMakeChar |
 		landlockAccessMakeDir |
 		landlockAccessMakeReg |
 		landlockAccessMakeSock |
-		landlockAccessMakeSym |
-		landlockAccessTruncate |
-		landlockAccessRefer
+		landlockAccessMakeSym
 
-	// All filesystem rights.
-	landlockAccessAll = landlockAccessExecute |
+	// All basic filesystem rights (valid on ABI 1+).
+	landlockAccessAllABI1 = landlockAccessExecute |
 		landlockAccessWriteFile |
 		landlockAccessReadFile |
 		landlockAccessReadDir |
@@ -75,9 +78,7 @@ const (
 		landlockAccessMakeDir |
 		landlockAccessMakeReg |
 		landlockAccessMakeSock |
-		landlockAccessMakeSym |
-		landlockAccessTruncate |
-		landlockAccessRefer
+		landlockAccessMakeSym
 
 	atFDCWD = -100 // same as unix.AT_FDCWD
 )
@@ -98,9 +99,36 @@ type helperConfig struct {
 	Network      NetworkAccess `json:"n"`
 }
 
+// abi returns the Landlock ABI version, or 0 if not available.
+func abi() int {
+	// When called with the version flag, landlock_create_ruleset returns the ABI
+	// version directly (a positive integer), NOT a file descriptor.
+	// See landlock_create_ruleset(2): "If ruleset_attr is NULL and size is 0
+	// and flags is LANDLOCK_CREATE_RULESET_VERSION, the highest supported
+	// Landlock ABI version is returned as a positive integer."
+	ver, _, err := syscall.Syscall(landlockCreateRuleset, 0, 0, landlockCreateVersion)
+	if err != 0 {
+		return 0
+	}
+	return int(ver)
+}
+
+// landlockAccessForABI returns the handled_access_fs mask for the given ABI.
+// This ensures we only request access rights the kernel understands.
+func landlockAccessForABI(abiVersion int) uint64 {
+	mask := uint64(landlockAccessAllABI1)
+	if abiVersion >= 2 {
+		mask |= landlockAccessRefer
+	}
+	if abiVersion >= 3 {
+		mask |= landlockAccessTruncate
+	}
+	return mask
+}
+
 func available() bool {
 	_, _, err := syscall.Syscall(landlockCreateRuleset, 0, 0, landlockCreateVersion)
-	return err == 0 || err == syscall.EINVAL || err == syscall.ENOMSG
+	return err == 0
 }
 
 func reasonUnavailable() string {
@@ -114,37 +142,24 @@ func reasonUnavailable() string {
 	if err == syscall.EOPNOTSUPP {
 		return "Landlock not enabled; add landlock=1 to kernel cmdline"
 	}
-	if err != 0 && err != syscall.EINVAL && err != syscall.ENOMSG {
+	if err != 0 {
 		return "Landlock error: " + err.Error()
 	}
 	return ""
 }
 
-func landlockGetABI() int {
-	// Calling landlock_create_ruleset with the version flag returns the ABI
-	// version as the return value (or a negative errno).
-	fd, _, err := syscall.Syscall(landlockCreateRuleset, 0, 0, landlockCreateVersion)
-	if err != 0 {
-		return 0
-	}
-	_ = syscall.Close(int(fd))
-	return 1
-}
-
 func probeLinux() ProbeResult {
 	r := ProbeResult{Platform: "linux"}
-	abi := landlockGetABI()
-	if abi == 0 {
+	v := abi()
+	if v == 0 {
 		r.Warning = "Landlock not available"
 		r.Backend = "none"
 		return r
 	}
-	r.Backend = fmt.Sprintf("landlock-abi%d", abi)
-	if abi >= 1 {
-		r.Sandboxed = true
-	} else {
-		r.Warning = fmt.Sprintf("Landlock ABI %d too old (needs 1+)", abi)
-		r.Backend = "none"
+	r.Backend = fmt.Sprintf("landlock-abi%d", v)
+	r.Sandboxed = true
+	if v < 3 {
+		r.Warning = "network restriction not supported (needs Landlock ABI 3+ / Linux 6.2+)"
 	}
 	return r
 }
@@ -164,7 +179,6 @@ func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
 		return fmt.Errorf("sandbox: cannot find self path: %w", err)
 	}
 
-	// Save original command info.
 	origPath := cmd.Path
 	origArgs := cmd.Args
 
@@ -184,9 +198,21 @@ func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
 
 // setupLandlock applies Landlock rules in the current (child) process.
 // Called by the helper init() before exec.
+//
+// NOTE: Network restrictions are NOT implemented for Linux in this version.
+// Landlock network support requires ABI >= 3 (Linux 6.2+) and additional
+// ruleset setup. When cfg.Network == NetworkDeny, the command WILL still
+// have network access on Linux. See Probe() for capability detection.
 func setupLandlock(cfg *helperConfig) error {
-	// Create ruleset.
-	attr := landlockRulesetAttr{HandledAccessFS: landlockAccessAll}
+	v := abi()
+	if v == 0 {
+		return fmt.Errorf("Landlock not available")
+	}
+
+	handled := landlockAccessForABI(v)
+
+	// Create ruleset with only the access rights supported by this kernel.
+	attr := landlockRulesetAttr{HandledAccessFS: handled}
 	rulesetFd, _, err := syscall.Syscall(landlockCreateRuleset,
 		uintptr(unsafe.Pointer(&attr)),
 		uintptr(unsafe.Sizeof(attr)),
@@ -198,24 +224,30 @@ func setupLandlock(cfg *helperConfig) error {
 	defer syscall.Close(int(rulesetFd))
 
 	// Allow read+execute on the entire filesystem (block all writes).
+	readAccess := handled &^ uint64(landlockAccessWriteABI1)
+	if v >= 2 {
+		readAccess &^= landlockAccessRefer
+	}
+	if v >= 3 {
+		readAccess &^= landlockAccessTruncate
+	}
+
 	if err := addPathRule(int(rulesetFd), &landlockPathBeneathAttr{
-		AllowedAccess: uint64(landlockAccessAll &^ landlockAccessWrite),
+		AllowedAccess: readAccess,
 	}, "/"); err != nil {
 		return fmt.Errorf("allow-read /: %w", err)
 	}
 
-	// Allow full access (reads + writes) on specified directories.
+	// Allow full access (including writes) on specified directories.
 	for _, dir := range cfg.WritableDirs {
 		if err := addPathRule(int(rulesetFd), &landlockPathBeneathAttr{
-			AllowedAccess: uint64(landlockAccessAll),
+			AllowedAccess: handled,
 		}, dir); err != nil {
 			return fmt.Errorf("allow-write %q: %w", dir, err)
 		}
 	}
 
 	// Apply the ruleset to the current process.
-	// This is inherited by all future children (but our only child is
-	// the real command we're about to exec).
 	ret, _, err := syscall.Syscall(landlockRestrictSelf, uintptr(rulesetFd), 0, 0)
 	if ret != 0 {
 		return fmt.Errorf("restrict self: %w", err)

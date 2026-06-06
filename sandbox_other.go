@@ -17,13 +17,7 @@ func reasonUnavailable() string {
 	return "sandboxing not supported on " + runtime.GOOS
 }
 
-func probeResult() ProbeResult {
-	// Not called on this platform — Probe() handles the fallback directly.
-	return ProbeResult{}
-}
-
 func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
 	// No sandbox enforcement. The command runs as-is.
-	// Callers can check Available() to decide whether to proceed.
 	return nil
 }

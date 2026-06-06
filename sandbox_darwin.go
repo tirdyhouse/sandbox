@@ -14,6 +14,12 @@ import (
 // macOS sandbox backend uses the built-in sandbox-exec(1) command.
 // No additional dependencies required — it ships with every macOS install.
 
+var _sandboxExecPath string // cached by init()
+
+func init() {
+	_sandboxExecPath, _ = exec.LookPath("sandbox-exec")
+}
+
 const macOSDefaultPolicy = `(version 1)
 
 (allow default)
@@ -38,27 +44,25 @@ const macOSDefaultPolicy = `(version 1)
 `
 
 func available() bool {
-	_, err := exec.LookPath("sandbox-exec")
-	return err == nil
+	return _sandboxExecPath != ""
 }
 
 func reasonUnavailable() string {
 	if runtime.GOOS != "darwin" {
 		return "not macOS"
 	}
-	_, err := exec.LookPath("sandbox-exec")
-	if err != nil {
+	if _sandboxExecPath == "" {
 		return "sandbox-exec not found (should be at /usr/bin/sandbox-exec)"
 	}
 	return ""
 }
 
 func probeDarwin() ProbeResult {
-	if _, err := exec.LookPath("sandbox-exec"); err != nil {
+	if _sandboxExecPath == "" {
 		return ProbeResult{
 			Platform: "darwin",
 			Backend:  "none",
-			Warning:  "sandbox-exec not found: " + err.Error(),
+			Warning:  "sandbox-exec not found",
 		}
 	}
 	return ProbeResult{
@@ -69,7 +73,7 @@ func probeDarwin() ProbeResult {
 }
 
 func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
-	// Generate sandbox profile.
+	// Generate sandbox profile content.
 	allowWrites := new(strings.Builder)
 	for _, p := range ctx.writable {
 		abs, err := filepath.Abs(p)
@@ -102,21 +106,20 @@ func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
 	}
 	f.Close()
 
-	// Register cleanup for the temp profile file.
-	ctx.addCleanup(func() { os.Remove(profilePath) })
+	// Register cleanup for the temp profile file on successful command completion.
+	// If we error out before returning, we clean up manually.
+	cleanupOK := false
+	defer func() {
+		if !cleanupOK {
+			os.Remove(profilePath)
+		}
+	}()
 
-	// Restructure the command to run via sandbox-exec.
-	// From:   mycmd arg1 arg2
-	// To:     sandbox-exec -f profile.sb mycmd arg1 arg2
-	sandboxExecPath, err := exec.LookPath("sandbox-exec")
-	if err != nil {
-		return fmt.Errorf("sandbox: sandbox-exec not found: %w", err)
-	}
-
+	// Build the sandbox-exec command.
 	origPath := cmd.Path
 	origArgs := cmd.Args
 
-	cmd.Path = sandboxExecPath
+	cmd.Path = _sandboxExecPath
 	cmd.Args = append([]string{
 		"sandbox-exec",
 		"-f", profilePath,
@@ -124,5 +127,7 @@ func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
 		origPath,
 	}, origArgs[1:]...)
 
+	cleanupOK = true
+	ctx.addCleanup(func() { os.Remove(profilePath) })
 	return nil
 }
