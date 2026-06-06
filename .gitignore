@@ -1,0 +1,23 @@
+# 构建产物
+/build/
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+
+# macOS
+.DS_Store
+
+# Go 工作区
+go.work
