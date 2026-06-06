@@ -1,12 +1,12 @@
 # sandbox — `os/exec`-style sandbox for Go
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/steven/sandbox.svg)](https://pkg.go.dev/github.com/steven/sandbox)
-[![Go Report Card](https://goreportcard.com/badge/github.com/steven/sandbox)](https://goreportcard.com/report/github.com/steven/sandbox)
+[![Go Reference](https://pkg.go.dev/badge/github.com/tirdyhouse/sandbox.svg)](https://pkg.go.dev/github.com/steven/sandbox)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tirdyhouse/sandbox)](https://goreportcard.com/report/github.com/steven/sandbox)
 
 **sandbox** is a Go package that provides `os/exec`-compatible command execution with filesystem sandboxing — **no Docker, no daemon, no extra installation**.
 
 ```go
-import "github.com/steven/sandbox"
+import "github.com/tirdyhouse/sandbox"
 
 // Default: working directory is writable, everything else is read-only.
 out, _ := sandbox.Command("go", "test", "./...").Output()
@@ -85,7 +85,7 @@ package main
 import (
 	"fmt"
 	"log"
-	"github.com/steven/sandbox"
+	"github.com/tirdyhouse/sandbox"
 )
 
 func main() {
