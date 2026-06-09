@@ -37,13 +37,4 @@ func main() {
 		log.Fatalf("command failed: %v", err)
 	}
 	fmt.Printf("Output: %s", out)
-
-	// Deny network access.
-	fmt.Println("\n=== Network denied ===")
-	cmd2 := sandbox.Command("curl", "--max-time", "2", "https://example.com")
-	cmd2.Policy.NetworkAccess = sandbox.NetworkDeny
-	err = cmd2.Run()
-	if err != nil {
-		fmt.Printf("Expected error (network blocked): %v\n", err)
-	}
 }

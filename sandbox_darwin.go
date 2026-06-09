@@ -38,9 +38,6 @@ const macOSDefaultPolicy = `(version 1)
 
 ; Allow sysctl read (uname, etc.).
 (allow sysctl-read)
-
-; Network policy.
-%s
 `
 
 func available() bool {
@@ -80,18 +77,13 @@ func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
 		if err != nil {
 			return fmt.Errorf("sandbox: resolve writable path %q: %w", p, err)
 		}
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = resolved
+		}
 		fmt.Fprintf(allowWrites, "(allow file-write* (subpath %q))\n", abs)
 	}
 
-	var netPolicy string
-	switch ctx.network {
-	case NetworkDeny:
-		netPolicy = "(deny network*)\n(allow network* (only localhost))"
-	default:
-		netPolicy = "(allow network*)"
-	}
-
-	profile := fmt.Sprintf(macOSDefaultPolicy, allowWrites.String(), netPolicy)
+	profile := fmt.Sprintf(macOSDefaultPolicy, allowWrites.String())
 
 	// Write profile to a temp file.
 	f, err := os.CreateTemp("", "sandbox-*.sb")

@@ -21,7 +21,6 @@ import (
 // No additional installation required — all APIs are part of Windows since Vista.
 //
 // Limitations:
-//   - NetworkDeny is not implemented (would need Windows Filtering Platform).
 //   - Writable directories get a Low Mandatory Label to allow child writes.
 //   - The label is NOT reverted after command completion (the parent process
 //     at Medium IL can still access them normally).
@@ -75,9 +74,9 @@ func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
 	if err := windows.DuplicateTokenEx(
 		token,
 		windows.TOKEN_ALL_ACCESS,
-		nil,                                  // security attributes
-		windows.SecurityAnonymous,            // impersonation level
-		windows.TokenPrimary,                 // token type
+		nil,                       // security attributes
+		windows.SecurityAnonymous, // impersonation level
+		windows.TokenPrimary,      // token type
 		&dupToken,
 	); err != nil {
 		return fmt.Errorf("sandbox: duplicate token: %w", err)

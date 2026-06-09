@@ -68,44 +68,22 @@ type Cmd struct {
 	cleanup []func()
 }
 
-// Policy defines filesystem and network restrictions for a sandboxed command.
-// Zero value uses sensible defaults (working dir writable, network allowed).
+// Policy defines filesystem restrictions for a sandboxed command.
+// Zero value uses sensible defaults (working dir writable).
 type Policy struct {
 	// WritableDirs lists paths the command is allowed to modify.
 	//   nil     → only Dir (or cwd) is writable
 	//   empty   → nothing is writable
 	//   [paths] → only the listed paths are writable
 	WritableDirs []string
-
-	// NetworkAccess controls network availability for the command.
-	NetworkAccess NetworkAccess
 }
-
-// NetworkAccess controls network availability.
-type NetworkAccess int
-
-const (
-	// NetworkAllow allows all network access (default).
-	NetworkAllow NetworkAccess = iota
-	// NetworkDeny blocks all network access for the command.
-	NetworkDeny
-	// NetworkDefault inherits the parent process's network (same as Allow).
-	NetworkDefault
-)
 
 // Command returns a Cmd to execute the named program with the given arguments.
-// The returned Cmd uses default policies (working dir writable, network allowed).
+// The returned Cmd uses default policies (working dir writable).
 func Command(name string, arg ...string) *Cmd {
 	return &Cmd{
-		Path:   name,
-		Args:   append([]string{name}, arg...),
-		Policy: defaultPolicy(),
-	}
-}
-
-func defaultPolicy() Policy {
-	return Policy{
-		NetworkAccess: NetworkAllow,
+		Path: name,
+		Args: append([]string{name}, arg...),
 	}
 }
 
@@ -195,7 +173,7 @@ func (c *Cmd) build() (*exec.Cmd, error) {
 	cmd.Stderr = c.Stderr
 
 	// Apply platform-specific sandbox restrictions.
-	sb := &sandboxCtx{writable: writable, network: c.Policy.NetworkAccess}
+	sb := &sandboxCtx{writable: writable}
 	if err := applySandbox(cmd, sb); err != nil {
 		return nil, &exec.Error{Name: c.Path, Err: err}
 	}
@@ -209,7 +187,6 @@ func (c *Cmd) build() (*exec.Cmd, error) {
 // sandboxCtx carries information from the Cmd to platform-specific apply functions.
 type sandboxCtx struct {
 	writable []string
-	network  NetworkAccess
 	cleanup  []func()
 }
 

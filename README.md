@@ -1,10 +1,10 @@
-# sandbox — os/exec-compatible cross-platform sandbox for Go
+# sandbox — os/exec-compatible directory-write sandbox for Go
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/tirdyhouse/sandbox.svg)](https://pkg.go.dev/github.com/tirdyhouse/sandbox)
 
 [中文](README.zh.md) | [English](README.md)
 
-**sandbox** is a Go package that provides `os/exec`-compatible command execution with filesystem sandboxing — **no Docker, no daemon, no extra installation**. Just import and use.
+**sandbox** is a Go package that provides `os/exec`-compatible command execution with directory write protection — **no Docker, no daemon, no extra installation**. Just import and use.
 
 > 🚀 **Built for the AI Agent era** — when your LLM generates and executes shell commands, `sandbox` prevents it from writing outside your workspace. No changes to your existing `os/exec` code.
 
@@ -21,10 +21,10 @@ cmd := sandbox.Command("bash", "-c", "go build -o /workspace/output ./...")
 cmd.Policy.WritableDirs = []string{"/workspace"}
 cmd.Run()
 
-// Python script, same sandbox:
+// Python script, same directory protection:
 sandbox.Command("python3", "train.py").Run()
 
-// AI-generated commands, safely sandboxed:
+// AI-generated commands, safely constrained:
 sandbox.Command("bash", "-c", aiGeneratedCommand).Run()
 ```
 
@@ -36,10 +36,10 @@ In the age of AI coding assistants, your agent will generate and run commands. W
 
 | Scenario | What sandbox protects |
 |---|---|
-| AI agent executing shell commands | Prevents writing to system/config dirs |
+| AI agent executing shell commands | Prevents writes to system/config dirs |
 | CI/CD build scripts | Ensures artifacts only go to the build dir |
-| Multi-tenant code execution | Isolates file writes per user |
-| Python/R scripts from untrusted sources | Limits damage from accidental writes |
+| Local build/test automation | Keeps generated files inside the workspace |
+| Python/R scripts from generated code | Limits damage from accidental writes |
 | `go test` / `npm install` / `pip install` | Prevents cache pollution outside workspace |
 
 ## How it works
@@ -54,19 +54,20 @@ Each platform uses its OS's **built-in** sandbox mechanism — nothing to instal
 
 ### Backend details
 
-**macOS** — Wraps command with `sandbox-exec(1)` + Seatbelt profile: deny all writes by default, allow only specified paths. Temp profile files cleaned up after command completion.
+**macOS** — Wraps commands with `sandbox-exec(1)` + a Seatbelt profile: deny all file writes by default, allow only specified paths. Temp profile files are cleaned up after command completion.
 
-**Linux** — Uses **Landlock** via raw syscalls (no CGO). The self-exec helper pattern: parent re-invokes itself with helper env, child sets up Landlock, then `exec`s the real command. **No bubblewrap or extra packages needed.** ABI auto-detection ensures compatibility across kernel versions (ABI 1+ / Linux 5.13+).
+**Linux** — Uses **Landlock** via raw syscalls (no CGO). The self-exec helper pattern lets the child set up Landlock before it `exec`s the real command. **No bubblewrap or extra packages needed.** ABI auto-detection ensures compatibility across kernel versions (ABI 1+ / Linux 5.13+).
 
-**Windows** — Creates a **Low Integrity** token for the child + sets Low Mandatory Label on writable directories via `SetNamedSecurityInfo`. Low IL processes can read Medium/High IL files but CANNOT write to them. No admin required for user-owned directories.
+**Windows** — Creates a **Low Integrity** token for the child + sets Low Mandatory Label on writable directories via `SetNamedSecurityInfo`. Low IL processes can read Medium/High IL files but cannot write to them. No admin required for user-owned directories.
 
 ### Key design
 
+- **Directory write protection only.** The package intentionally does not block network access.
 - **No Docker.** No containers, no daemon, no setup scripts.
 - **No bubblewrap dependency on Linux.** Landlock is built into the kernel since 5.13.
-- **Low Integrity Level on Windows.** Read everything, write only where allowed.
+- **Low Integrity Level on Windows.** Read broadly, write only where allowed.
 - **os/exec compatible API.** Drop-in replacement for your existing command execution code.
-- **Per-command policy.** Each `Cmd` has its own `Policy.WritableDirs` and `Policy.NetworkAccess`.
+- **Per-command policy.** Each `Cmd` has its own `Policy.WritableDirs`.
 
 ## API
 
@@ -81,7 +82,7 @@ sandbox.Command(name string, arg ...string) *Cmd
 (*Cmd).CombinedOutput()      // Capture stdout+stderr
 
 // Capability detection.
-sandbox.Available()          // Is sandboxing supported?
+sandbox.Available()          // Is directory write protection supported?
 sandbox.Probe() ProbeResult  // Detailed capability info
 sandbox.ReasonUnavailable()  // Why sandboxing is unavailable
 ```
@@ -96,18 +97,13 @@ cmd := sandbox.Command("python", "script.py")
 //   empty   → nothing is writable
 //   [paths] → only the listed paths are writable
 cmd.Policy.WritableDirs = []string{"/workspace"}
-
-// NetworkAccess:
-cmd.Policy.NetworkAccess = sandbox.NetworkAllow   // default
-cmd.Policy.NetworkAccess = sandbox.NetworkDeny    // block network
 ```
-
-> **Note:** On Linux, `NetworkDeny` requires Landlock ABI 3+ (kernel 6.2+). `Probe()` reports the ABI version. On Windows, network restriction is not yet implemented.
 
 ## Safety
 
 - This package provides **filesystem write protection**, not a full security boundary.
-- Designed to prevent accidental writes to unintended directories, not to contain malicious code.
+- It does **not** block network access, process execution, CPU/memory usage, or reads from allowed OS-visible files.
+- It is designed to prevent accidental writes to unintended directories, not to contain malicious code.
 - For stronger isolation (multi-tenant, untrusted code), pair with a microVM or container runtime.
 
 ## Example
@@ -118,6 +114,7 @@ package main
 import (
 	"fmt"
 	"log"
+
 	"github.com/tirdyhouse/sandbox"
 )
 
@@ -157,9 +154,9 @@ sandbox/
   <a href="https://helix.iqe.me/"><strong>Helix</strong></a> — <em>Open AI Agent Platform</em>
 </p>
 
-**sandbox** is developed with support from [Helix](https://helix.iqe.me/) — an open AI agent platform that runs every LLM-generated command in a sandboxed environment.
+**sandbox** is developed with support from [Helix](https://helix.iqe.me/) — an open AI Agent platform that constrains LLM-generated command writes to the intended workspace.
 
-Helix provides managed build environments, [EasyGateway](https://helix.iqe.me/) tunnels for secure internet access, multi-agent coordination, and workspace-driven workflows. **We sandbox the commands, so you don't have to worry.**
+Helix provides managed build environments, [EasyGateway](https://helix.iqe.me/) tunnels for secure internet access, multi-agent coordination, and workspace-driven workflows. **We constrain command writes, so you don't have to worry.**
 
 > Try Helix at [helix.iqe.me](https://helix.iqe.me/)
 

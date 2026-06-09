@@ -1,10 +1,10 @@
-# sandbox — 跨平台 Go 沙箱，兼容 os/exec
+# sandbox — 兼容 os/exec 的 Go 目录写保护沙箱
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/tirdyhouse/sandbox.svg)](https://pkg.go.dev/github.com/tirdyhouse/sandbox)
 
 [English](README.md) | [中文](README.zh.md)
 
-**sandbox** 是一个 Go 包，提供 `os/exec` 兼容的命令执行接口，并内置文件系统沙箱——**不需要 Docker、不需要后台进程、不需要额外安装**。直接导入即可使用。
+**sandbox** 是一个 Go 包，提供 `os/exec` 兼容的命令执行接口，并内置目录写保护——**不需要 Docker、不需要后台进程、不需要额外安装**。直接导入即可使用。
 
 > 🚀 **为 AI Agent 时代而生** —— 当 LLM 自动生成并执行 shell 命令时，`sandbox` 能确保它不会写到工作区以外的目录。**无需修改你现有的 `os/exec` 代码。**
 
@@ -21,10 +21,10 @@ cmd := sandbox.Command("bash", "-c", "go build -o /workspace/output ./...")
 cmd.Policy.WritableDirs = []string{"/workspace"}
 cmd.Run()
 
-// 跑 Python 脚本，同样受沙箱保护：
+// 跑 Python 脚本，同样受目录写保护：
 sandbox.Command("python3", "train.py").Run()
 
-// AI 生成的命令，安全执行：
+// AI 生成的命令，限制在可写目录内：
 sandbox.Command("bash", "-c", aiGeneratedCommand).Run()
 ```
 
@@ -38,8 +38,8 @@ sandbox.Command("bash", "-c", aiGeneratedCommand).Run()
 |---|---|
 | AI Agent 执行 shell 命令 | 防止写到系统/配置目录 |
 | CI/CD 构建脚本 | 确保产物只输出到构建目录 |
-| 多租户代码执行 | 隔离每个用户的文件写入 |
-| 不可信的 Python/R 脚本 | 限制误写造成的损失 |
+| 本地构建/测试自动化 | 把生成文件限制在工作区内 |
+| AI 生成的 Python/R 脚本 | 限制误写造成的损失 |
 | `go test` / `npm install` / `pip install` | 防止缓存污染工作区外目录 |
 
 ## 工作原理
@@ -54,7 +54,7 @@ sandbox.Command("bash", "-c", aiGeneratedCommand).Run()
 
 ### 后端详解
 
-**macOS** — 用 `sandbox-exec(1)` 包装命令 + Seatbelt 策略文件：默认拒绝所有写入，只允许指定路径。临时策略文件在命令完成后自动清理。
+**macOS** — 用 `sandbox-exec(1)` 包装命令 + Seatbelt 策略文件：默认拒绝所有文件写入，只允许指定路径。临时策略文件在命令完成后自动清理。
 
 **Linux** — 使用 **Landlock**（Linux 安全模块），通过 raw syscall 实现（无 CGO）。采用 self-exec helper 模式：父进程重新调用自己，子进程设置 Landlock 后 `exec` 真实命令。**不需要 bubblewrap 或其他额外安装包。** ABI 自动检测确保跨内核版本兼容（ABI 1+ / Linux 5.13+）。
 
@@ -62,11 +62,12 @@ sandbox.Command("bash", "-c", aiGeneratedCommand).Run()
 
 ### 设计要点
 
+- **只做目录写保护。** 本包有意不拦截网络访问。
 - **不需要 Docker。** 没有容器、没有后台进程、没有配置脚本。
 - **Linux 不需要 bubblewrap。** Landlock 从内核 5.13 起内置。
-- **Windows 使用 Low Integrity Level。** 能读所有文件，但只能在允许的地方写入。
+- **Windows 使用 Low Integrity Level。** 可广泛读取，只能在允许目录写入。
 - **API 兼容 os/exec。** 可直接替换你现有的命令执行代码。
-- **每个命令独立策略。** 每个 `Cmd` 有自己的 `Policy.WritableDirs` 和 `Policy.NetworkAccess`。
+- **每个命令独立策略。** 每个 `Cmd` 有自己的 `Policy.WritableDirs`。
 
 ## API
 
@@ -81,7 +82,7 @@ sandbox.Command(name string, arg ...string) *Cmd
 (*Cmd).CombinedOutput()      // 捕获 stdout+stderr
 
 // 能力检测。
-sandbox.Available()          // 当前平台是否支持沙箱？
+sandbox.Available()          // 当前平台是否支持目录写保护？
 sandbox.Probe() ProbeResult  // 详细能力信息
 sandbox.ReasonUnavailable()  // 为什么不支持
 ```
@@ -96,17 +97,12 @@ cmd := sandbox.Command("python", "script.py")
 //   empty   → 所有目录都不可写
 //   [paths] → 只有列出的路径可写
 cmd.Policy.WritableDirs = []string{"/workspace"}
-
-// NetworkAccess:
-cmd.Policy.NetworkAccess = sandbox.NetworkAllow   // 默认
-cmd.Policy.NetworkAccess = sandbox.NetworkDeny    // 禁止网络
 ```
-
-> **注意：** Linux 上 `NetworkDeny` 需要 Landlock ABI 3+（内核 6.2+）。`Probe()` 会报告 ABI 版本。Windows 上暂未实现网络限制。
 
 ## 安全说明
 
 - 本包提供**文件系统写保护**，不是完整的安全边界。
+- 本包**不**拦截网络访问、进程执行、CPU/内存使用，也不阻止读取操作系统可见文件。
 - 设计用于防止**意外**写入非预期目录，不能用于隔离恶意代码。
 - 如需更强隔离（多租户、不可信代码），建议搭配微 VM 或容器运行时。
 
@@ -118,6 +114,7 @@ package main
 import (
 	"fmt"
 	"log"
+
 	"github.com/tirdyhouse/sandbox"
 )
 
@@ -144,7 +141,7 @@ sandbox/
 ├── helper_linux.go         # Linux self-exec helper
 ├── sandbox_stubs*.go       # 跨平台编译桩
 ├── examples/main.go        # 使用示例
-├── README.md               # 英文文档
+├── README.md               # English docs
 ├── README.zh.md            # 本文件
 └── go.mod / go.sum
 ```
@@ -157,14 +154,11 @@ sandbox/
   <a href="https://helix.iqe.me/"><strong>Helix</strong></a> — <em>开放 AI Agent 平台</em>
 </p>
 
-**sandbox** 由 [Helix](https://helix.iqe.me/) 支持开发。Helix 是一个开放 AI Agent 平台，在沙箱环境中安全运行 LLM 生成的每条命令。Helix 坚持**全工具链纯 Go 实现**——从 Agent 运行时、LLM 路由、沙箱、MCP 工具层到代码分析，全部用 Go 编写，零外部运行时依赖。
+**sandbox** 由 [Helix](https://helix.iqe.me/) 支持开发。Helix 是一个开放 AI Agent 平台，会把 LLM 生成命令的写入限制在预期工作区内。Helix 坚持**全工具链纯 Go 实现**——从 Agent 运行时、LLM 路由、沙箱、MCP 工具层到代码分析，全部用 Go 编写，零外部运行时依赖。
 
-Helix 提供托管构建环境、[EasyGateway](https://helix.iqe.me/) 穿透隧道、多 Agent 协作和工作区驱动工作流。**一条命令部署：**
+Helix 提供托管构建环境、[EasyGateway](https://helix.iqe.me/) 穿透隧道、多 Agent 协作和工作区驱动工作流。**我们限制命令写入范围，让你不用担心误写目录。**
 
-```bash
-```
-
-> 立即体验： [helix.iqe.me](https://helix.iqe.me/)
+> 立即体验：[helix.iqe.me](https://helix.iqe.me/)
 
 ## 开源协议
 

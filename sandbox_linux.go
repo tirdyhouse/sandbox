@@ -27,9 +27,9 @@ import (
 //
 // syscall numbers (stable across architectures):
 //
-//	 444 — landlock_create_ruleset
-//	 445 — landlock_add_rule
-//	 446 — landlock_restrict_self
+//	444 — landlock_create_ruleset
+//	445 — landlock_add_rule
+//	446 — landlock_restrict_self
 const (
 	landlockCreateRuleset   = 444
 	landlockAddRule         = 445
@@ -95,8 +95,7 @@ type landlockPathBeneathAttr struct {
 
 // helperConfig is serialised to JSON and passed to the child process.
 type helperConfig struct {
-	WritableDirs []string      `json:"w"`
-	Network      NetworkAccess `json:"n"`
+	WritableDirs []string `json:"w"`
 }
 
 // abi returns the Landlock ABI version, or 0 if not available.
@@ -158,16 +157,12 @@ func probeLinux() ProbeResult {
 	}
 	r.Backend = fmt.Sprintf("landlock-abi%d", v)
 	r.Sandboxed = true
-	if v < 3 {
-		r.Warning = "network restriction not supported (needs Landlock ABI 3+ / Linux 6.2+)"
-	}
 	return r
 }
 
 func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
 	cfg := helperConfig{
 		WritableDirs: ctx.writable,
-		Network:      ctx.network,
 	}
 	cfgJSON, err := json.Marshal(cfg)
 	if err != nil {
@@ -196,13 +191,8 @@ func applySandbox(cmd *exec.Cmd, ctx *sandboxCtx) error {
 	return nil
 }
 
-// setupLandlock applies Landlock rules in the current (child) process.
+// setupLandlock applies Landlock filesystem rules in the current (child) process.
 // Called by the helper init() before exec.
-//
-// NOTE: Network restrictions are NOT implemented for Linux in this version.
-// Landlock network support requires ABI >= 3 (Linux 6.2+) and additional
-// ruleset setup. When cfg.Network == NetworkDeny, the command WILL still
-// have network access on Linux. See Probe() for capability detection.
 func setupLandlock(cfg *helperConfig) error {
 	v := abi()
 	if v == 0 {
